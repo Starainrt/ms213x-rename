@@ -129,6 +129,10 @@ func (e *Edid) SetSum() {
 	e.originBytes[127] = e.CalcSum()
 }
 
+func (e *Edid) Verify() bool {
+	return e.originBytes[127] == e.CalcSum()
+}
+
 func (e *Edid) SetManufacturerId(mid string) error {
 	match, err := regexp.MatchString(`^[A-Z]{3}$`, mid)
 	if err != nil || !match {

@@ -35,11 +35,13 @@ func init() {
 	cmdMain.Flags().StringVarP(&saveFirmwarePath, "save-firmware", "o", "", "Save the modified firmware to a file")
 	cmdMain.Flags().BoolVarP(&showDetail, "show-detail", "v", false, "Show the detail information of the EDID")
 	cmdMain.SilenceUsage = true
+	cmdMain.AddCommand(cmdCheck)
 }
 
 var cmdMain = &cobra.Command{
 	Short: "MS213X Collector Display Name Modification Tool",
 	Long:  "This tool can help you modify the basic EDID information in the MS213X collector firmware, such as the display name, serial number etc...",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			log.Printf("Please specify a firmware or edid bin file.")
@@ -82,12 +84,12 @@ var cmdMain = &cobra.Command{
 				return err
 			}
 		} else {
-			edidBytes, err := os.ReadFile(attachEdidPath)
+			edidFile, err := os.Open(attachEdidPath)
 			if err != nil {
 				log.Printf("read EDID file %s failed: %v", attachEdidPath, err)
 				return err
 			}
-			edid, err = NewEdid(edidBytes)
+			edid, err = loadEdidFromFile(edidFile)
 			if err != nil {
 				log.Printf("parse EDID file %s failed: %v", attachEdidPath, err)
 				return err
@@ -106,17 +108,59 @@ var cmdMain = &cobra.Command{
 			of, err := os.Create(saveFirmwarePath)
 			if err != nil {
 				log.Printf("create firmware file %s failed: %v", saveFirmwarePath, err)
-				os.Exit(6)
+				return err
 			}
-			defer of.Close()
 			err = applyFirstEDID2NewFile(f, of, edid)
 			if err != nil {
 				log.Printf("apply EDID to firmware failed: %v", err)
+				of.Close()
 				return err
 			}
+			of.Close()
 			log.Printf("Save modified firmware to %s Ok", saveFirmwarePath)
+			srcHash, err := hashWithoutEdid(args[0])
+			if err != nil {
+				log.Printf("Failed to calculate the hash of original firmware:%v; do not use the generated firmware.", err)
+				return err
+			}
+			dstHash, err := hashWithoutEdid(saveFirmwarePath)
+			if err != nil {
+				log.Printf("Failed to calculate the hash of generated firmware:%v; do not use the generated firmware.", err)
+				return err
+			}
+			if srcHash != dstHash {
+				log.Printf("fireware hash verification failed,original hash:%s,generated hash:%s,not equal,!! do not use the generated firmware !!", srcHash, dstHash)
+				return errors.New("verify hash failed")
+			}
 		}
 		return lastErr
+	},
+}
+
+var cmdCheck = &cobra.Command{
+	Use:   "hash",
+	Short: "removing the EDID part from the old and new firmware for hash verification",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		srcHash, err := hashWithoutEdid(args[0])
+		if err != nil {
+			log.Printf("Calc src firmware hash failed:%v", err)
+			return err
+		}
+		dstHash, err := hashWithoutEdid(args[1])
+		if err != nil {
+			log.Printf("Calc saved firmware hash failed:%v", err)
+			return err
+		}
+		log.Printf("Src firmware hash:%s", srcHash)
+		log.Printf("Saved firmware hash:%s", dstHash)
+		if srcHash == dstHash {
+			log.Printf("Verify firmware hash OK")
+		} else {
+			log.Printf("Verify firmware hash failed")
+			return errors.New("verify hash failed")
+		}
+		return nil
 	},
 }
 

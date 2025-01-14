@@ -1,6 +1,6 @@
 module github.com/starainrt/ms213x-rename
 
-go 1.22.4
+go 1.20
 
 require github.com/spf13/cobra v1.8.1
 

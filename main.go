@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ func findFirstEDID(r io.Reader) (*Edid, error) {
 		}
 		buffer = append(buffer[8:], b[:n]...)
 		if idx := bytes.Index(buffer, header); idx >= 0 {
+			fmt.Println("found")
 			nextEdid := make([]byte, 128-(16-idx))
 			if _, err := io.ReadFull(r, nextEdid); err != nil {
 				return nil, err
@@ -65,9 +67,16 @@ func loadEdidFromFile(f *os.File) (*Edid, error) {
 		return nil, err
 	}
 	if len(data) != 128 {
-		return nil, fmt.Errorf("No edid found")
+		return nil, fmt.Errorf("cannot find the EDID; the size of the EDID should be 128 bytes, not %d bytes", len(data))
 	}
-	return NewEdid(data)
+	edid, err := NewEdid(data)
+	if err != nil {
+		return nil, err
+	}
+	if !edid.Verify() {
+		return nil, fmt.Errorf("EDID verification failed")
+	}
+	return edid, nil
 }
 
 func applyFirstEDID2NewFile(in, out *os.File, edid *Edid) error {
@@ -110,5 +119,41 @@ func applyFirstEDID2NewFile(in, out *os.File, edid *Edid) error {
 			applyed = true
 		}
 
+	}
+}
+
+func hashWithoutEdid(fpath string) (string, error) {
+	hash := sha512.New()
+	f, err := os.Open(fpath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	header, _ := hex.DecodeString("00ffffffffffff00")
+	buffer := make([]byte, 16)
+	for {
+		b := make([]byte, 8)
+		n, err := f.Read(b)
+		if err != nil {
+			if err == io.EOF {
+				return hex.EncodeToString(hash.Sum(nil)), nil
+			}
+			return "", err
+		}
+		buffer = append(buffer[8:], b[:n]...)
+		if idx := bytes.Index(buffer, header); idx >= 0 {
+			if idx > 8 {
+				hash.Write(buffer[8:idx])
+			}
+			nextEdid := make([]byte, 128-(16-idx))
+			if _, err := io.ReadFull(f, nextEdid); err != nil {
+				if err == io.EOF {
+					return hex.EncodeToString(hash.Sum(nil)), nil
+				}
+				return "", err
+			}
+		} else {
+			hash.Write(b[:n])
+		}
 	}
 }
